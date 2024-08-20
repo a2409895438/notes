@@ -318,11 +318,7 @@ ReentrantLock和synchronized都是重入锁
 
 
 
-## 6. AQS
-
-AQS 的全称为 `AbstractQueuedSynchronizer` ，翻译过来的意思就是抽象队列同步器。
-
-AQS 核心思想是，如果被请求的共享资源空闲，则将当前请求资源的线程设置为有效的工作线程，并且将共享资源设置为锁定状态。如果被请求的共享资源被占用，那么就需要一套线程阻塞等待以及被唤醒时锁分配的机制，这个机制 AQS 是用 **CLH 队列锁** 实现的，即将暂时获取不到锁的线程加入到队列中。
+## 6. 
 
 
 
@@ -380,15 +376,13 @@ sleep()方法导致了程序暂停执行指定的时间，让出cpu给其他线�
 
 当ThreadLocal对象不再使用时，使用弱引用可以让对象被回收；因为仅有弱引用没有强引用的情况下，对象是可以被回收的。
 
-Java SE 1.6中，锁一共有4种状态，级别从低到高依次是：无锁状态、偏向锁状态、轻量级锁状态和重量级锁状态，这几个状态会随着竞争情况逐渐升级。锁可以升级但不能降级，意味着偏向锁升级成轻量级锁后不能降级成偏向锁。这种锁升级却不能降级的策略，目的是为了提高获得锁和释放锁的效率。对象的MarkWord变化为下图：
 
-![在这里插入图片描述](javafigures/1c349aae2b46ff0886f08619d0357424.png)
 
 
 
 ## 10. Synchronized理解
 
-在 JVM（Java虚拟机） 中，对象在内存中分为三块区域：对象头、实例数据、对其填充
+synchronized的底层实现是完全依赖JVM虚拟机的，在 JVM（Java虚拟机） 中，对象在内存中分为三块区域：对象头、实例数据、对其填充
 
 每一个JAVA对象都会与一个监视器monitor关联，我们可以把它理解成为一把锁，当一个线程想要执行一段被 synchronized 圈起来的同步方法或者代码块时，该线程得先获取到synchronized修饰的对象对应的monitor
 
@@ -408,6 +402,74 @@ Monitor 被翻译为监视器或管程
 >
 > 如果其他线程通过一定次数的CAS尝试没有成功，则进入重量级锁；
 
+Java SE 1.6中，锁一共有4种状态，级别从低到高依次是：无锁状态、偏向锁状态、轻量级锁状态和重量级锁状态，这几个状态会随着竞争情况逐渐升级。锁可以升级但不能降级，意味着偏向锁升级成轻量级锁后不能降级成偏向锁。这种锁升级却不能降级的策略，目的是为了提高获得锁和释放锁的效率。对象的MarkWord变化为下图：
+
+![在这里插入图片描述](javafigures/1c349aae2b46ff0886f08619d0357424.png)
+
+
+
+## 11. AQS
+
+AQS 的全称为 `AbstractQueuedSynchronizer` ，翻译过来的意思就是抽象队列同步器。
+
+AQS 核心思想是，如果被请求的共享资源空闲，则将当前请求资源的线程设置为有效的工作线程，并且将共享资源设置为锁定状态。如果被请求的共享资源被占用，那么就需要一套线程阻塞等待以及被唤醒时锁分配的机制，这个机制 AQS 是用 **CLH 队列锁** 实现的，即将暂时获取不到锁的线程加入到队列中。
+
+AQS是一个抽象类，定义了线程抢锁和释放锁的抽象。AQS实现同步机制有两种模式，一种是独占模式，一种是共享模式。两种模式分别提供两个模板方法实现。四个模板方法为acquire，release，acquireShared，releaseShared。
+
+```java
+public final void acquire(int arg) {
+        if (!tryAcquire(arg) &&
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            selfInterrupt();
+}
+```
+
+**acquire**方法是独占模式上锁的整个逻辑，这个方法是一个模板方法，其中的**tryAcquire**是获取锁的逻辑，这个方法是一个抽象方法，由具体的子类实现，如何获取锁，怎样才算获取到锁这些问题子类自己决定，AQS不做处理。
+
+**addWaiter**方法负责是线程存储的逻辑，aqs里面存储机制的核心是两个队列，等待队列和条件队列，它们用来保存被阻塞的线程，在这个方法中通过cas+自旋的方式将线程添加到等待队列中。
+
+入队成功后，就要挂起线程了，**acquireQueued**方法就是挂起操作，线程挂起的逻辑和线程唤醒后的逻辑都在此方法中
+
+```java
+final boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+            for (;;) {
+                final Node p = node.predecessor();
+                if (p == head && tryAcquire(arg)) {
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return interrupted;
+                }
+                if (shouldParkAfterFailedAcquire(p, node) && parkAndCheckInterrupt())
+                    interrupted = true;
+            }
+        } finally {
+            if (failed)
+                cancelAcquire(node);
+        }
+    }
+```
+
+**release**方法也是一个模板方法，tryRelease是释放锁的方法，它是抽象方法，具体由子类来实现。
+
+```
+//独占模式的锁调用的释放锁逻辑    
+public final boolean release(int arg) {
+    if (tryRelease(arg)) {
+        Node h = head;
+        if (h != null && h.waitStatus != 0)
+            unparkSuccessor(h);   // 释放成功后就要唤醒被阻塞的线程
+        return true;
+    }
+    return false;
+}
+```
+
+
+
 
 
 
@@ -417,6 +479,14 @@ Monitor 被翻译为监视器或管程
 
 
 ## 1. jvm内存模型，gc的具体过程
+
+- 程序计数器
+- 虚拟机栈：线程私有
+- 本地方法栈
+- 堆：对象几乎是在堆上分配的
+- 方法区：存储已经被虚拟机加载的类xin'xi
+
+
 
 
 

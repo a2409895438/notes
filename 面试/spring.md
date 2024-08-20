@@ -24,3 +24,5 @@ DispatcherServlet 是Spring MVC的前端控制器，它负责将请求路由到�
 # SpringBoot
 
 https://www.yuque.com/snailclimb/mf2z3k/vqe4gz#hBEUb
+
+SpringBoot的启动流程
